@@ -1,0 +1,110 @@
+----- MALLOC ------
+
+When you malloc something of size sz we do the following:
+     
+   ------ TCACHE -------
+   1. If a tcache entry is available for the requested size return this entry
+
+   ------ ARENAS -------
+   2. If single threaded set the relevant arena to the main_arena
+   3. If multi threaded it gets an arena by doing the following:
+      1. Attempt to get lcok for the last succesfully locked arena by this thread
+      2. Circularly follow the linked list of arenas until we acquire a lock
+      3. If no arena is available, create a new arena
+      4. If no new arena can be created just make as large an arena as you can, malloc will deal with this later
+         by seeing that it doesnt have enough space so it will just mmap the chunk anyways
+      5. If we cannot return even this smaller heap we return NULL.
+      
+   2. Check if the size is valid when we include headers and alignment. If not, return NULL.
+   3. If no arenas are able to be used (av == NULL), MMAP the chunk
+
+   ----- FASTBIN -----
+   4. If the size is a valid fastbin size do the following:
+      1. Get the fastbin head for that size (this is our chunk candidate, called victim)
+         If none are present continue to SMALLBIN
+      2. If single threaded simply set the fastbin head to point to the next element
+         If multithreaded we use a safer function called REMOVE_FB which does exactly this
+      3. While we are already accesing memory from that fastbin we take the opportunity to move fastbins to tcache of the same size
+         while the fastbin is not empty and the corresponding tcache is not full.
+      4. Get a pointer to the data section of the chunk
+      5. Obfuscate if necessary using `alloc_perturb`
+      6. *Return this pointer*
+
+   ----- SMALLBIN ----- (CYCLIC DOUBLY LINKED?)
+   5. If the size is valid for a smallbin do the following:
+      1. Get last small bin entry for that size (this is our chunk candidate, called victim)
+         If none are present continue to LARGEBIN
+      2. While we are already accesing memory from that fastbin we take the opportunity to move smallbins to tcache of the same size
+         while the smallbin is not empty and the corresponding tcache is not full.
+      3. Get a pointer to the data section of the chunk
+      4. Obfuscate if necessary using `alloc_perturb`
+      5. *Return this pointer*
+
+   ----- LARGEBIN -----
+   6. If the size is valid for a smallbin do the following:
+      1. If fastchunks are present we remove all fast chunks, put them into the unsorted bin, and consolidate as needed
+
+   while unsorted->bk != unsorted
+   	 victim is unsorted->bk
+	 bck is victim->bk
+	 size is victim size
+	 next is chunk after victim
+
+	 if request in small_bin range
+	    bck is unsorted
+	    victim is last_remainder (remainder of most recent split of a small request)
+	    remainder_size is victim size - requested size
+	    remainder is victim at requested size
+	    unsorted->bk = unsorted->fd = remainder
+	    last_remainder is remainder
+
+	    if remainder_size is not in small bin range
+	       remainder->fd_nextsize = NULL
+	       remainder->bk_nextsize = NULL
+
+	    victim->mchunk_size = (nb + relevant flags)
+	    remainder->mchunk_size = (remainder-size + relevant_flags)
+	    (remainder + remainder_size)->mchunk_prev_size = remainder_size
+	    Get a pointer to the data section of the victim
+	    Obfuscate if necessary using `alloc_perturb`      
+	    *Return this pointer*
+
+	 unsorted->bk is bck (i.e. unsorted->bk->bk)
+	 bck->fd is unsorted (i.e. unsorted->bk->bk->fd)
+
+	 if size is requested_size (exact fit)
+	    if tcache has space
+	       put victim in tcache
+	       mark return cache (for later)
+	    else
+		Get a pointer to the data section of the victim
+		Obfuscate if necessary using `alloc_perturb`    
+		*Return this pointer*
+
+         if size is in smallbin range (this can only occur because we previously consolidated
+   X. If given a valid arena, this process still fails to find a valid chunk, we retry once with a different arena
+
+----- CONSOLIDATE ------
+
+1. Set have_fastchunks to false
+2. While we still have fast bin entries, do the following:
+   1. Get fastbin (fb)
+   2. Get top of this fastbin (p)
+   3. While p is not NULL do the following:
+      1. Get size of p (size)
+      2. If p has the previously in use bit not set we can consolidate
+      	 1. Add previous size of chunk to size
+	 2. Set p to be at an offset backwards by the previous size
+	 3. Unlink p from any bin
+
+      X. Set p to p->fd (break if p->fd is NULL)
+   nextp is
+   size is fb size
+   nextchunk is chunk after fb
+   nextsize is size of nextchunk
+
+   if fb does not have prev_inuse
+      prevsize is previous size from fb chunk
+      size += prevsize
+      fb now points to fb - prevsize
+      unlink fb from all bin lists

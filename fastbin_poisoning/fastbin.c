@@ -21,7 +21,7 @@ int main(void) {
   size_t ptrs[20] = {0};
 
   //Fill tcache
-  //Create 8 pointers in fastbin
+  //Create 7 pointers in fastbin
   for (int i = 0; i < 14; i++) { ptrs[i] = (size_t)malloc(0x10); }
   for (int i = 0; i < 14; i++) { free((void*)ptrs[i]); }
   

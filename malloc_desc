@@ -41,47 +41,22 @@ When you malloc something of size sz we do the following:
       5. *Return this pointer*
 
    ----- LARGEBIN -----
-   6. If the size is valid for a smallbin do the following:
-      1. If fastchunks are present we remove all fast chunks, put them into the unsorted bin, and consolidate as needed
-
-   while unsorted->bk != unsorted
-   	 victim is unsorted->bk
-	 bck is victim->bk
-	 size is victim size
-	 next is chunk after victim
-
-	 if request in small_bin range
-	    bck is unsorted
-	    victim is last_remainder (remainder of most recent split of a small request)
-	    remainder_size is victim size - requested size
-	    remainder is victim at requested size
-	    unsorted->bk = unsorted->fd = remainder
-	    last_remainder is remainder
-
-	    if remainder_size is not in small bin range
-	       remainder->fd_nextsize = NULL
-	       remainder->bk_nextsize = NULL
-
-	    victim->mchunk_size = (nb + relevant flags)
-	    remainder->mchunk_size = (remainder-size + relevant_flags)
-	    (remainder + remainder_size)->mchunk_prev_size = remainder_size
-	    Get a pointer to the data section of the victim
-	    Obfuscate if necessary using `alloc_perturb`      
-	    *Return this pointer*
-
-	 unsorted->bk is bck (i.e. unsorted->bk->bk)
-	 bck->fd is unsorted (i.e. unsorted->bk->bk->fd)
-
-	 if size is requested_size (exact fit)
-	    if tcache has space
-	       put victim in tcache
-	       mark return cache (for later)
-	    else
-		Get a pointer to the data section of the victim
-		Obfuscate if necessary using `alloc_perturb`    
-		*Return this pointer*
-
-         if size is in smallbin range (this can only occur because we previously consolidated
+   6. We remove all fast chunks, put them into the unsorted bin, and consolidate as needed
+   7. While there are elements in unsorted chunks do the following:
+      1. Get the unsorted->bk (this is our chunk candidate, called victim)
+      2. If victim is the only chunk present in the unsorted bin && our request is small (smallbin range) && victim is designated
+         as last remainder && the chunk size is large enough to create a chunk with (size - nb) remaining
+	 1. Split the victim such that the top half is nb bytes and the bottom half (our remainder) is the remaining size
+	 2. Point the unsorted bin to and from the remainder instead of to the victim.
+	 3. If the remainder isn't small enough for fastbin NULL out its fd_nextsize and bk_nextsize
+ 	 4. Get a pointer to the data section of the victim
+	 5. Obfuscate if necessary using `alloc_perturb`      
+	 6. *Return this pointer*
+      3. Remove victim from unsorted binx
+      4. If victim is an exact fit
+         1. Set inuse bit of next chunk
+	 2. If size is a valid tcache put the victim in the tcache
+	 3. Otherwise, immediately *return this pointer*
    X. If given a valid arena, this process still fails to find a valid chunk, we retry once with a different arena
 
 ----- CONSOLIDATE ------
